@@ -1,7 +1,10 @@
-from typing import TextIO, Dict, Any, List
+from typing import TextIO, Dict, Any, List, TypedDict, Literal
 
 import pandas as pd
 from pandas import DataFrame, Series
+
+import numpy as np
+from numpy import ndarray
 import matplotlib.pyplot as plt
 
 # CONSTANT VARIABLES #############################################################################
@@ -9,6 +12,17 @@ START_DATE: int = 0
 END_DATE: int = 100
 NUMBER_OF_INSTRUMENTS: int = 50
 RAW_PRICES_FILEPATH: str = "./prices.txt"
+
+# Standard Deviation Lookbacks
+SHORT_TERM_STDDEV_LOOKBACK: int = 10
+MONTHLY_STDDEV_LOOKBACK: int = 21
+QUARTERLY_STDDEV_LOOKBACK: int = 60
+YEARLY_STDDEV_LOOKBACK: int = 252
+
+# UTILITY SCHEMAS ###############################################################################
+class PricePlotOptions(TypedDict):
+    moving_average: Literal['none', 'simple', 'exponential']
+    moving_average_periods: int
 
 # CLASSES ########################################################################################
 class MarketData:
@@ -55,9 +69,12 @@ class MarketData:
         self.market_data_df = market_data_df
 
     """
-    plots an instrument's price data over a specified timeline 
+    plots an instrument's price data over a specified timeline. You can also supply an
+    'PricePlotOptions' dictionary to provide extra specifications when plotting  (i.e. embedding
+    a simple/exponential moving average) 
     """
-    def plot_instrument_price_data(self, instrument_no: int, start_day: int, end_day: int) -> None:
+    def plot_instrument_price_data(self, instrument_no: int, start_day: int, end_day: int,
+        options: PricePlotOptions = None) -> None:
         # Filter rows matching the instrument and day range and sort by day
         instrument_data: DataFrame = self.market_data_df[
             (self.market_data_df["instrument-no"] == instrument_no) &
@@ -67,8 +84,22 @@ class MarketData:
         days: Series = instrument_data["day"]
         prices: Series = instrument_data["open-price"]
 
+        # If a moving average was specified
+        moving_average: Series
+        if options is not None and options["moving_average"] != "none":
+            # if it's a simple moving average
+            if options["moving_average"] == "simple":
+                moving_average= prices.rolling(window=options["moving_average_periods"]).mean()
+            else:
+                moving_average = prices.ewm(span=options["moving_average_periods"],
+                    adjust=False).mean()
+
+
+        # Plot
         plt.figure(figsize=(10,5))
         plt.plot(days, prices, marker="o", linestyle="-")
+        if options is not None and options["moving_average"] != "none":
+            plt.plot(days, moving_average, color="orange")
         plt.xlabel("Day")
         plt.ylabel("Open Price")
         plt.title(f"Instrument {instrument_no}: Price from Day {start_day} to {end_day}")
@@ -76,8 +107,46 @@ class MarketData:
         plt.tight_layout()
         plt.show()
 
+    """
+    plots an instrument's volatility over a specified timeline and a given lookback. Function
+    assumes that start_day >= lookback
+    """
+    def plot_instrument_volatility(self, instrument_no: int, start_day: int, end_day: int,lookback:
+    int) -> None:
+        # Filter rows matching the instrument and day range and sort by day
+        instrument_data: DataFrame = self.market_data_df[
+            (self.market_data_df["instrument-no"] == instrument_no) &
+            (self.market_data_df["day"] >= start_day - lookback) & (self.market_data_df["day"] <=
+                                                               end_day)
+        ].sort_values(by="day")
 
+        # Compute returns from price series
+        prices: Series = instrument_data["open-price"]
+        returns: Series = prices.pct_change().fillna(0)
+
+        # Compute rolling standard deviation over lookback window
+        rolling_std: Series = returns.rolling(window=lookback).std()
+
+        # Restrict only the days >= start_day
+        rolling_std = rolling_std[instrument_data["day"] >= start_day]
+        days: ndarray = np.arange(start_day, end_day)
+
+        # Plot volatility
+        plt.figure(figsize=(10,5))
+        plt.plot(days, rolling_std, marker="o", linestyle="-")
+        plt.xlabel("Day")
+        plt.ylabel("Volatility")
+        plt.title(f"Instrument {instrument_no}: Volatility from Day"
+                  f" {start_day} to {end_day} with lookback of {lookback} days")
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.tight_layout()
+        plt.show()
 
 
 marketData = MarketData()
-marketData.plot_instrument_price_data(5, 0, 100)
+
+options: PricePlotOptions = PricePlotOptions()
+options["moving_average"] = 'exponential'
+options["moving_average_periods"] = 5
+
+marketData.plot_instrument_price_data(5, 0, 100, options)
