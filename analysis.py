@@ -147,7 +147,7 @@ class MarketData:
     max lag limit
     """
     def plot_instrument_autocorrelation(self, instrument_no: int, start_day: int, end_day: int,
-        lag_limit: int):
+        lag_limit: int) -> None:
         # Filter rows matching the instrument and day range and sort by day
         instrument_data: DataFrame = self.market_data_df[
             (self.market_data_df["instrument-no"] == instrument_no) &
@@ -182,11 +182,34 @@ class MarketData:
         plt.tight_layout()
         plt.show()
 
+    """
+    """
+    def plot_instrument_returns_distribution(self, instrument_no: int, start_day: int,
+         end_day: int) -> None:
+        # Filter rows matching the instrument and day range and sort by day
+        instrument_data: DataFrame = self.market_data_df[
+            (self.market_data_df["instrument-no"] == instrument_no) &
+            (self.market_data_df["day"] >= start_day) & (self.market_data_df["day"] <= end_day)
+            ].sort_values(by="day")
+
+        # Get arithmetic returns
+        prices: ndarray = instrument_data["open-price"]
+        returns: ndarray = np.diff(prices) / prices[:-1]
+
+        # Plot returns distribution
+        plt.figure(figsize=(10,5))
+        plt.hist(returns, bins=20, density=True, alpha=0.7, edgecolor="black")
+        plt.xlabel("Daily Return")
+        plt.ylabel("Probability Density")
+        plt.title(f"Instrument {instrument_no}: Distribution of daily returns from day "
+                  f"{start_day} to {end_day}")
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.show()
 
 # MAIN EXECUTION #################################################################################
 def main() -> None:
     marketData = MarketData()
-    marketData.plot_instrument_price_data(33, 0, 200, None)
-    marketData.plot_instrument_autocorrelation(33, 0, 200, 20)
+    marketData.plot_instrument_price_data(5, 0, 200, None)
+    marketData.plot_instrument_returns_distribution(5, 0, 200)
 
 main()
