@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 # CONSTANT VARIABLES #############################################################################
 START_DATE: int = 0
-END_DATE: int = 100
+END_DATE: int = 300
 NUMBER_OF_INSTRUMENTS: int = 50
 RAW_PRICES_FILEPATH: str = "./prices.txt"
 
@@ -142,11 +142,51 @@ class MarketData:
         plt.tight_layout()
         plt.show()
 
+    """
+    plots as instrument's autocorrelation over a specified timeline with lags 1 to a specified
+    max lag limit
+    """
+    def plot_instrument_autocorrelation(self, instrument_no: int, start_day: int, end_day: int,
+        lag_limit: int):
+        # Filter rows matching the instrument and day range and sort by day
+        instrument_data: DataFrame = self.market_data_df[
+            (self.market_data_df["instrument-no"] == instrument_no) &
+            (self.market_data_df["day"] >= start_day) & (self.market_data_df["day"] <= end_day)
+        ].sort_values(by="day")
 
-marketData = MarketData()
 
-options: PricePlotOptions = PricePlotOptions()
-options["moving_average"] = 'exponential'
-options["moving_average_periods"] = 5
+        mean: float = instrument_data["open-price"].mean()
 
-marketData.plot_instrument_price_data(5, 0, 100, options)
+        # Form demeaned series
+        prices: ndarray = instrument_data["open-price"]
+        demeaned = prices - mean
+
+        # Compute denominator
+        denominator: float = np.dot(demeaned,demeaned)
+
+        # Compute lag-k autocorrelations
+        autocorrelations: ndarray = np.array([np.dot(demeaned[k:], demeaned[:-k]) / denominator
+              for k in range (1, lag_limit+1)])
+
+        # Set up series of lags from 1 to lag_limit
+        lags: ndarray = np.arange(1, lag_limit + 1)
+
+        # Plot
+        plt.figure(figsize=(10,5))
+        plt.plot(lags, autocorrelations, marker="o", linestyle="-")
+        plt.xlabel("K")
+        plt.ylabel("Auto-Correlation")
+        plt.title(f"Instrument {instrument_no}: Auto-correlation from day {start_day} to "
+                  f"{end_day} with lags 1 to {lag_limit}")
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.tight_layout()
+        plt.show()
+
+
+# MAIN EXECUTION #################################################################################
+def main() -> None:
+    marketData = MarketData()
+    marketData.plot_instrument_price_data(33, 0, 200, None)
+    marketData.plot_instrument_autocorrelation(33, 0, 200, 20)
+
+main()
