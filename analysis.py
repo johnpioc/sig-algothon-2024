@@ -1,4 +1,5 @@
 from typing import TextIO, Dict, Any, List, TypedDict, Literal
+import sys
 
 import pandas as pd
 from pandas import DataFrame, Series
@@ -19,6 +20,34 @@ MONTHLY_STDDEV_LOOKBACK: int = 21
 QUARTERLY_STDDEV_LOOKBACK: int = 60
 YEARLY_STDDEV_LOOKBACK: int = 252
 
+# Auto correlation default lag limit
+default_lag_limit: int = 20
+
+# Usage Error message
+usage_error_message: str = """
+    Usage: analysis.py [instrument_no] [start_day] [end_day] [OPTION]
+    
+    OPTIONS:
+    --price - plot price chart
+        --sma [lookback] - plot simple moving average with the price plot (must specify --price)
+        --ema [lookback] - plot exponential moving average with the price plot (must specify 
+        --price)
+    --acf [lag_limit] - plot auto-correlation with lags 1 to lag_limit
+    --volatility [lookback] - plot volatility
+    --returns - plot returns distribution
+    
+    Examples:
+        analysis.py 5 0 500 -all
+        analysis.py 20 100 150 --price 
+        analysis.py 1 200 400 --price --sma 10
+    
+    NOTES:
+    - You can only specify a max of 1 option
+    - start_day must be greater than or equal to 0
+    - end_day must be less than or equal to 500
+    - start_day must be less than end_day
+"""
+
 # UTILITY SCHEMAS ###############################################################################
 class PricePlotOptions(TypedDict):
     moving_average: Literal['none', 'simple', 'exponential']
@@ -26,10 +55,19 @@ class PricePlotOptions(TypedDict):
 
 # CLASSES ########################################################################################
 class MarketData:
-    def __init__(self) -> None:
+    def __init__(self, start_day: int, end_day: int) -> None:
         # Initialise the market data dataframe
         self.market_data_df: DataFrame | None = None
-        self.initialise_market_data_dataframe()
+        self.initialise_market_data_dataframe(start_day, end_day)
+
+    def get_instrument_data(self, instrument_no: int, start_day: int, end_day: int) -> DataFrame:
+        # Filter rows matching the instrument and day range and sort by day
+        instrument_data: DataFrame = self.market_data_df[
+            (self.market_data_df["instrument-no"] == instrument_no) &
+            (self.market_data_df["day"] >= start_day) & (self.market_data_df["day"] <= end_day)
+            ].sort_values(by="day")
+
+        return instrument_data
 
     """
     loads the prices.txt file and initialises the market data dataframe with the following 
@@ -40,7 +78,7 @@ class MarketData:
     - open-price: the price at market open for that instrument on that day
     - return: the percentage change for that instrument on that day based on the previous day
     """
-    def initialise_market_data_dataframe(self) -> DataFrame:
+    def initialise_market_data_dataframe(self, start_day, end_day) -> DataFrame:
         # Read the raw prices dataset file
         raw_prices_df: DataFrame = pd.read_csv(RAW_PRICES_FILEPATH, sep=r"\s+", header=None)
 
@@ -48,7 +86,7 @@ class MarketData:
         market_data_df: DataFrame = pd.DataFrame(columns=["day", "instrument-no", "open-price",
             "change-pct"])
 
-        for day in range(START_DATE, END_DATE):
+        for day in range(start_day, end_day + 1):
             for instrument_no in range(0,NUMBER_OF_INSTRUMENTS):
                 new_entry: List[int, int, float, float] = []
                 new_entry.append(day)
@@ -75,11 +113,7 @@ class MarketData:
     """
     def plot_instrument_price_data(self, instrument_no: int, start_day: int, end_day: int,
         options: PricePlotOptions = None) -> None:
-        # Filter rows matching the instrument and day range and sort by day
-        instrument_data: DataFrame = self.market_data_df[
-            (self.market_data_df["instrument-no"] == instrument_no) &
-            (self.market_data_df["day"] >= start_day) & (self.market_data_df["day"] <= end_day)
-        ].sort_values(by="day")
+        instrument_data: DataFrame = self.get_instrument_data(instrument_no, start_day, end_day)
 
         days: Series = instrument_data["day"]
         prices: Series = instrument_data["open-price"]
@@ -113,12 +147,7 @@ class MarketData:
     """
     def plot_instrument_volatility(self, instrument_no: int, start_day: int, end_day: int,lookback:
     int) -> None:
-        # Filter rows matching the instrument and day range and sort by day
-        instrument_data: DataFrame = self.market_data_df[
-            (self.market_data_df["instrument-no"] == instrument_no) &
-            (self.market_data_df["day"] >= start_day - lookback) & (self.market_data_df["day"] <=
-                                                               end_day)
-        ].sort_values(by="day")
+        instrument_data: DataFrame = self.get_instrument_data(instrument_no, start_day, end_day)
 
         # Compute returns from price series
         prices: Series = instrument_data["open-price"]
@@ -148,12 +177,7 @@ class MarketData:
     """
     def plot_instrument_autocorrelation(self, instrument_no: int, start_day: int, end_day: int,
         lag_limit: int) -> None:
-        # Filter rows matching the instrument and day range and sort by day
-        instrument_data: DataFrame = self.market_data_df[
-            (self.market_data_df["instrument-no"] == instrument_no) &
-            (self.market_data_df["day"] >= start_day) & (self.market_data_df["day"] <= end_day)
-        ].sort_values(by="day")
-
+        instrument_data: DataFrame = self.get_instrument_data(instrument_no, start_day, end_day)
 
         mean: float = instrument_data["open-price"].mean()
 
@@ -183,14 +207,11 @@ class MarketData:
         plt.show()
 
     """
+    Plots an instruments returns distribution over a specified timeline
     """
     def plot_instrument_returns_distribution(self, instrument_no: int, start_day: int,
          end_day: int) -> None:
-        # Filter rows matching the instrument and day range and sort by day
-        instrument_data: DataFrame = self.market_data_df[
-            (self.market_data_df["instrument-no"] == instrument_no) &
-            (self.market_data_df["day"] >= start_day) & (self.market_data_df["day"] <= end_day)
-            ].sort_values(by="day")
+        instrument_data: DataFrame = self.get_instrument_data(instrument_no, start_day, end_day)
 
         # Get arithmetic returns
         prices: ndarray = instrument_data["open-price"]
@@ -208,8 +229,60 @@ class MarketData:
 
 # MAIN EXECUTION #################################################################################
 def main() -> None:
-    marketData = MarketData()
-    marketData.plot_instrument_price_data(5, 0, 200, None)
-    marketData.plot_instrument_returns_distribution(5, 0, 200)
+    # Get command line arguments
+    total_args: int = len(sys.argv)
+
+    if total_args < 5:
+        print(usage_error_message)
+    else:
+        instrument_no: int = int(sys.argv[1])
+        start_day: int = int(sys.argv[2])
+        end_day: int = int(sys.argv[3])
+
+        market_data = MarketData(start_day, end_day)
+        option: str = sys.argv[4]
+
+        if option == "--price":
+            if total_args >= 6:
+                moving_average_arg = sys.argv[5]
+                if moving_average_arg == "--sma" or moving_average_arg == "--ema":
+                    if 7 < total_args:
+                        print(usage_error_message)
+                        return
+                    else:
+                        lookback: int = int(sys.argv[6])
+                        options: PricePlotOptions = PricePlotOptions()
+                        options["moving_average_periods"] = lookback
+                        options["moving_average"] = "simple" if moving_average_arg == "sma" else (
+                            "exponential")
+                        market_data.plot_instrument_price_data(instrument_no, start_day,
+                           end_day, options)
+                else:
+                    print(usage_error_message)
+                    return
+            else:
+                market_data.plot_instrument_price_data(instrument_no, start_day, end_day)
+        elif option == "--acf":
+            if total_args < 6:
+                lag_limit: int = int(sys.argv[5])
+                market_data.plot_instrument_autocorrelation(instrument_no, start_day, end_day,
+                    lag_limit)
+            else:
+                print(usage_error_message)
+                return
+        elif option == "--volatility":
+            if total_args < 6:
+                lookback: int = int(sys.argv[5])
+                market_data.plot_instrument_volatility(instrument_no, start_day, end_day,
+                       lookback)
+            else:
+                print(usage_error_message)
+                return
+        elif option == "--returns":
+            market_data.plot_instrument_returns_distribution(instrument_no, start_day,
+                                                             end_day)
+        else:
+            print(usage_error_message)
+            return
 
 main()
